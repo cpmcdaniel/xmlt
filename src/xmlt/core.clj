@@ -1,6 +1,8 @@
 (ns xmlt.core
   (:import [javax.xml.stream
-            XMLInputFactory XMLOutputFactory]))
+            XMLInputFactory XMLOutputFactory]
+           [javax.xml.stream.events
+            StartElement]))
 
 (def input-factory ^XMLInputFactory (XMLInputFactory/newFactory))
 (def output-factory ^XMLOutputFactory (XMLOutputFactory/newFactory))
@@ -19,3 +21,20 @@
 #_(let [w (java.io.StringWriter.)]
     (events->xml (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>")) w)
     (str w))
+
+(defn start-element-handler [handler & {:keys [path tag]}]
+  (fn [events {:keys [event-path event-tag attrs ctx] :as handler-info}]
+    (when (and (instance? (first events) StartElement)
+               (or (not path) (= event-path path))
+               (or (not tag) (= event-tag tag)))
+      (handler events handler-info))))
+
+(defn traverse [events & {:keys [ctx handlers]}]
+  )
+
+(traverse (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>"))
+          :ctx {:key :v
+                :evs []}
+          :handlers [(fn [events {:keys [ctx] :as handler-info}]
+                       (let [[e & more] events]
+                         [e (update-in ctx [:evs] conj {:ev e}) more]))])
