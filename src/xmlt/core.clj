@@ -2,7 +2,7 @@
   (:import [javax.xml.stream
             XMLInputFactory XMLOutputFactory]
            [javax.xml.stream.events
-            StartElement EndElement]))
+            StartElement EndElement Characters]))
 
 (def input-factory ^XMLInputFactory (XMLInputFactory/newFactory))
 (def output-factory ^XMLOutputFactory (XMLOutputFactory/newFactory))
@@ -29,31 +29,77 @@
                (or (not tag) (= event-tag tag)))
       (handler events handler-info))))
 
-(defn traverse [events & {:keys [ctx handlers]}]
-  )
-
 (defn split-to-matching-element [events]
   (letfn [(split-to-matching-element* [depth before-matching-event after-matching-event]
-          (lazy-seq
-           (if (seq after-matching-event)
-             (let [e (first after-matching-event)
-                   more (lazy-seq (rest after-matching-event))]
-               (condp instance? e
-                 StartElement (split-to-matching-element* (inc depth) (lazy-cat before-matching-event [e]) more)
-                 EndElement (if (zero? depth)
-                              [before-matching-event more]
-                              (split-to-matching-element* (dec depth) (lazy-cat before-matching-event [e]) more))
-                 (split-to-matching-element* depth (lazy-cat before-matching-event [e]) more)))
-             [before-matching-event nil])))]
+            (lazy-seq
+             (if (seq after-matching-event)
+               (let [e (first after-matching-event)
+                     more (lazy-seq (rest after-matching-event))]
+                 (condp instance? e
+                   StartElement (split-to-matching-element* (inc depth)
+                                                            (lazy-cat before-matching-event [e]) more)
+                   EndElement (if (zero? depth)
+                                ;; TODO should 'after' include the end
+                                ;; element? Possibly to help with popping off the path
+                                [before-matching-event after-matching-event]
+                                (split-to-matching-element* (dec depth)
+                                                            (lazy-cat before-matching-event [e]) more))
+                   (split-to-matching-element* depth (lazy-cat before-matching-event [e]) more)))
+               [before-matching-event nil])))]
     (split-to-matching-element* 0 nil events)))
 
-#_(let [[before after] (split-to-matching-element
-                        (drop 2 (xml->events
-                                 (java.io.StringReader.
-                                  "<foo><bar>Hello world</bar><bar>Hello world</bar><bar>Hello world</bar><bar>Hello world</bar></foo><blowp><Wraqw>"))))]
-  before)
+
+(defn handle-events [events path {:keys [ctx handlers]}]
+  (->> {:handlers handlers}
+
+       ;; try each handler in turn
+       (iterate 
+        (fn [{[handler & more] :handlers}]
+          {:handler-result (handler events :ctx ctx :path path)
+           :handlers more}))
+
+       ;; drop nil results if there are still handlers.
+       (drop-while (fn [{:keys [handler-result handlers]}]
+                     (and (not handler-result)
+                          (seq handlers))))
+
+       ;; return the first handler result
+       first
+       :handler-result))
+
+{:path [:doc :book :trade] :handle (fn [events & {:keys [ctx path]}]
+                                     events)}
+
+(handle-events 'eventsy 'pathy {:ctx 'ctx
+                :handlers [(fn [e & {:keys [ctx path]}]
+                             path)
+                           (fn [e & {:keys [ctx path]}]
+                             nil)]})
 
 
+
+(defn traverse [events & {:keys [ctx handlers] :as traversal}]
+  (letfn [(get-new-path [event current-path]
+            )
+          (traverse* [events path {:keys [ctx handlers] :as traversal}]
+            (lazy-seq
+             (if-not (seq events)
+               [nil ctx]
+               
+               (if-let [[handled-events rest-events ctx] (handle-events events path traversal)]
+                 ;; Handler's handled - pass off the events and recurse through rest-events
+                 (if (seq rest-events)
+                   (lazy-seq
+                    (let [[sub-handled-events ctx] (traverse* rest-events path (assoc traversal
+                                                                                 :ctx ctx))]
+                      [(lazy-cat handled-events sub-handled-events) ctx]))
+                   [handled-events ctx])
+
+                 ;; Nobody's interested - default handler
+                 ;; (handle top event, modify path and recurse)
+                 (let [[e & more] events])))))]
+    
+    (traverse* events [] traversal)))
 
 #_(traverse (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>"))
             :ctx {:key :v
