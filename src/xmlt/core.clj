@@ -18,88 +18,61 @@
     (doseq [event events]
       (. event-writer (add event)))))
 
-#_(let [w (java.io.StringWriter.)]
-    (events->xml (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>")) w)
-    (str w))
-
-(defn start-element-handler [handler & {:keys [path tag]}]
-  (fn [events {:keys [event-path event-tag attrs ctx] :as handler-info}]
-    (when (and (instance? (first events) StartElement)
-               (or (not path) (= event-path path))
-               (or (not tag) (= event-tag tag)))
-      (handler events handler-info))))
-
-(defn split-to-matching-element [events]
-  (letfn [(split-to-matching-element* [depth before-matching-event after-matching-event]
-            (lazy-seq
-             (if (seq after-matching-event)
-               (let [e (first after-matching-event)
-                     more (lazy-seq (rest after-matching-event))]
-                 (condp instance? e
-                   StartElement (split-to-matching-element* (inc depth)
-                                                            (lazy-cat before-matching-event [e]) more)
-                   EndElement (if (zero? depth)
-                                ;; TODO should 'after' include the end
-                                ;; element? Possibly to help with popping off the path
-                                [before-matching-event after-matching-event]
-                                (split-to-matching-element* (dec depth)
-                                                            (lazy-cat before-matching-event [e]) more))
-                   (split-to-matching-element* depth (lazy-cat before-matching-event [e]) more)))
-               [before-matching-event nil])))]
-    (split-to-matching-element* 0 nil events)))
-
-
-(defn handle-events [events path {:keys [ctx handlers]}]
-  (->> {:handlers handlers}
+(defn- handle-events [handlers {:keys [ctx events path] :as m}]
+  (->> handlers
 
        ;; try each handler in turn
-       (iterate 
-        (fn [{[handler & more] :handlers}]
-          {:handler-result (handler events :ctx ctx :path path)
-           :handlers more}))
+       (reductions
+        (fn [_ handler]
+          (handler m))
+        nil)
 
-       ;; drop nil results if there are still handlers.
-       (drop-while (fn [{:keys [handler-result handlers]}]
-                     (and (not handler-result)
-                          (seq handlers))))
+       (drop-while nil?) ;; drop while the handlers aren't interested
+       first))           ;; get the first one that is
 
-       ;; return the first handler result
-       first
-       :handler-result))
+(defn traverse [events & {:keys [ctx handlers]}]
+  (mapcat :out-events ;; TODO how to get ctx out?
+          (take-while #(or (:out-events %) (seq (:events %)))
+                      (rest (iterate (fn [{:keys [events path ctx] :as m}]
+                                       (when (seq events)
+                                         (if-let [handled-m (handle-events handlers m)]
+                                           handled-m
+                                           ;; TODO handle with default
+                                           (do))))
 
-{:path [:doc :book :trade] :handle (fn [events & {:keys [ctx path]}]
-                                     events)}
+                                     {:events events
+                                      :path nil
+                                      :ctx ctx})))))
 
-(handle-events 'eventsy 'pathy {:ctx 'ctx
-                :handlers [(fn [e & {:keys [ctx path]}]
-                             path)
-                           (fn [e & {:keys [ctx path]}]
-                             nil)]})
+#_(time (let [events (lazy-cat ["test" "world hello"] ["diff"])
+              ctx {}
+              handlers [(fn [{[e & more] :events
+                              :keys [ctx path]
+                              :as m}]
+                          (when-let [c (:count ctx)]
+                            (-> m
+                                (assoc :events more)
+                                (assoc :out-events (repeat c e)))))
+                        (fn [{[e & more] :events
+                              :keys [ctx path]
+                              :as m}]
+                          (-> m
+                              (assoc :events more)
+                              (assoc :out-events [e])))]]
+          (mapcat :out-events
+                  (take-while #(or (:out-events %) (seq (:events %)))
+                              (rest (iterate (fn [{:keys [events path ctx] :as m}]
+                                               (when (seq events)
+                                                 (if-let [handled-m (handle-events handlers m)]
+                                                   (merge m (dissoc handled-m :path))
+                                                   ;; TODO handle with default
+                                                   (do))))
+
+                                             {:events events
+                                              :path nil
+                                              :ctx ctx}))))))
 
 
-
-(defn traverse [events & {:keys [ctx handlers] :as traversal}]
-  (letfn [(get-new-path [event current-path]
-            )
-          (traverse* [events path {:keys [ctx handlers] :as traversal}]
-            (lazy-seq
-             (if-not (seq events)
-               [nil ctx]
-               
-               (if-let [[handled-events rest-events ctx] (handle-events events path traversal)]
-                 ;; Handler's handled - pass off the events and recurse through rest-events
-                 (if (seq rest-events)
-                   (lazy-seq
-                    (let [[sub-handled-events ctx] (traverse* rest-events path (assoc traversal
-                                                                                 :ctx ctx))]
-                      [(lazy-cat handled-events sub-handled-events) ctx]))
-                   [handled-events ctx])
-
-                 ;; Nobody's interested - default handler
-                 ;; (handle top event, modify path and recurse)
-                 (let [[e & more] events])))))]
-    
-    (traverse* events [] traversal)))
 
 #_(traverse (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>"))
             :ctx {:key :v
