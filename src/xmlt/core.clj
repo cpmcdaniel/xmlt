@@ -70,7 +70,8 @@
                        (add-tag ch content)
                        (l/enqueue ch (. event-factory (createEndElement "" "" (name tag)))))
    (string? element) (l/enqueue ch (. event-factory (createCharacters element)))
-   (seq? element) (doseq [e element] (add-tag ch e))))
+   (seq? element) (doseq [e element] (add-tag ch e))
+   :otherwise (add-tag ch (str element))))
 
 (defn transform-file [in-stream out-writer transformer]
   (let [[our-ch their-ch] (l/channel-pair)
@@ -123,6 +124,5 @@
 
                                                                                           :after
                                                                                           (fn [& {:keys [ctx]}]
-                                                                                            (add-str ch (format "There were %s :world tags"
-                                                                                                                (count (:worlds ctx)))))}))})))
+                                                                                            (add-tag ch [:world-count (count (:worlds ctx))]))}))})))
   (str sw))
