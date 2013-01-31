@@ -62,9 +62,15 @@
 (defn add-str [ch s]
   (l/enqueue ch (. event-factory (createCharacters s))))
 
-(defn add-tag [ch & elements]
-  (doseq [element elements]
-    ))
+(defn add-tag [ch element]
+  ;; TODO doesn't handle attributes yet.
+  (cond
+   (vector? element) (let [[tag & content] element]
+                       (l/enqueue ch (. event-factory (createStartElement "" "" (name tag))))
+                       (add-tag ch content)
+                       (l/enqueue ch (. event-factory (createEndElement "" "" (name tag)))))
+   (string? element) (l/enqueue ch (. event-factory (createCharacters element)))
+   (seq? element) (doseq [e element] (add-tag ch e))))
 
 (defn transform-file [in-stream out-writer transformer]
   (let [[our-ch their-ch] (l/channel-pair)
@@ -79,6 +85,7 @@
     (l/enqueue their-ch start-doc)
             
     (l/run-pipeline nil
+                    {:error-handler (fn [_] (.close reader))}
                     (fn [_]
                       (transformer their-ch start-root-tag))
 
@@ -96,8 +103,8 @@
                                       ;; return the context
                                       (constantly ctx))))))
 
-#_(let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello><world>Text</world><world>More text</world></hello></root>")]
+(let [sw (java.io.StringWriter.)
+      sr (java.io.StringReader. "<root><hello><world>Text</world><world>More text</world><world>Even more text</world></hello></root>")]
   @(transform-file sr sw
                    (fn [ch current-tag]
                      (transform-tag-content ch current-tag
