@@ -1,4 +1,6 @@
-(defproject jarohen/xmlt "0.1.0"
+(require '[clojure.java.shell :refer [sh]])
+
+(defproject jarohen/xmlt (.trim (:out (sh "git" "describe" "--tags" "--abbrev=0")))
   :description "An XML transformation library for Clojure"
   :url "https://github.com/james-henderson/xmlt"
   :license {:name "Eclipse Public License"
