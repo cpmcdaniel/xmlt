@@ -94,13 +94,14 @@
                       (transformer their-ch start-root-tag))
 
                     (fn [ctx]
-                      ;; This redirects any unused events (ideally
-                      ;; just the end-root and end-doc) back to us
-                      (l/siphon their-ch their-ch)
-                      (l/close their-ch)
-                      (.close reader)
-                              
                       (l/run-pipeline nil
+                                      (fn [_] (l/read-channel their-ch))
+
+                                      (fn [end-doc]
+                                        (l/enqueue their-ch end-doc)
+                                        (l/close their-ch)
+                                        (l/on-drained their-ch #(.close reader)))
+                                      
                                       ;; await the renderer task
                                       (constantly renderer-task)
 
