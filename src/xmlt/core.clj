@@ -57,7 +57,10 @@
                                                      (after-transformer :ctx ctx :ch ch)
                                                      ctx)]
                                      (l/enqueue ch ev)
-                                     (l/complete after-ctx)))))))
+                                     (l/complete after-ctx)))
+
+                      (do (l/enqueue ch ev)
+                          (l/restart m))))))
 
 (defn add-str [ch s]
   (l/enqueue ch (. event-factory (createCharacters s))))
