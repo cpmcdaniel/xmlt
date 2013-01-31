@@ -1,16 +1,22 @@
 (ns xmlt.core
+  (:require [lamina
+             [core :as l]
+             [executor :as lex]])
   (:import [javax.xml.stream
-            XMLInputFactory XMLOutputFactory]
+            XMLInputFactory XMLOutputFactory XMLEventFactory]
            [javax.xml.stream.events
             StartElement EndElement Characters]))
 
+
 (def input-factory ^XMLInputFactory (XMLInputFactory/newFactory))
 (def output-factory ^XMLOutputFactory (XMLOutputFactory/newFactory))
+(def event-factory ^XMLEventFactory (XMLEventFactory/newFactory))
 
 (defn xml->events [reader-or-stream]
   ;; TODO encoding?
   (let [event-reader (. input-factory (createXMLEventReader reader-or-stream))]
-    (iterator-seq event-reader)))
+    {:reader event-reader
+     :events (iterator-seq event-reader)}))
 
 (defn events->xml [events writer-or-stream]
   ;; TODO again, encoding...
@@ -18,65 +24,98 @@
     (doseq [event events]
       (. event-writer (add event)))))
 
-(defn- handle-events [handlers {:keys [ctx events path] :as m}]
-  (->> handlers
+(defn transform-tag-content [ch current-tag & {:keys [ctx path-transformers]}]
+  (l/enqueue ch current-tag)
+  (l/run-pipeline {:ctx ctx :path []}
+                  (fn [{:keys [ctx path] :as m}]
+                    (l/run-pipeline (l/read-channel ch)
+                                    (fn [ev] (assoc m :ev ev))))
 
-       ;; try each handler in turn
-       (reductions
-        (fn [_ handler]
-          (handler m))
-        nil)
+                  (fn [{:keys [ctx path ev] :as m}]
+                    (condp instance? ev
+                      StartElement (let [start-el-name (keyword (.. ev getName getLocalPart))
+                                         new-path (conj path {:tag start-el-name})]
+                                     (if-let [transformer (get path-transformers (map :tag new-path))]
+                                       (let [after-ctx @(l/run-pipeline (transformer :ch ch :current-tag ev :ctx ctx))]
+                                         (l/restart {:ctx after-ctx :path path}))
+                                       (do (l/enqueue ch ev)
+                                           (l/restart {:ctx ctx :path new-path}))))
 
-       (drop-while nil?) ;; drop while the handlers aren't interested
-       first))           ;; get the first one that is
+                      Characters (let [text (.. ev getData)
+                                       new-path (conj path {:tag 'text})]
+                                   (if-let [transformer (get path-transformers (map :tag new-path))]
+                                     (let [after-ctx @(l/run-pipeline (transformer :ch ch :text text :ctx ctx))]
+                                       (l/restart {:ctx after-ctx :path path}))
+                                     (do (l/enqueue ch ev)
+                                         (l/restart m))))
 
-(defn traverse [events & {:keys [ctx handlers]}]
-  (mapcat :out-events ;; TODO how to get ctx out?
-          (take-while #(or (:out-events %) (seq (:events %)))
-                      (rest (iterate (fn [{:keys [events path ctx] :as m}]
-                                       (when (seq events)
-                                         (if-let [handled-m (handle-events handlers m)]
-                                           handled-m
-                                           ;; TODO handle with default
-                                           (do))))
+                      EndElement (if-let [new-path (seq (butlast path))]
+                                   (do (l/enqueue ch ev)
+                                       (l/restart {:ctx ctx :path (vec new-path)}))
 
-                                     {:events events
-                                      :path nil
-                                      :ctx ctx})))))
+                                   (let [after-ctx (if-let [after-transformer (get path-transformers :after)]
+                                                     (after-transformer :ctx ctx :ch ch)
+                                                     ctx)]
+                                     (l/enqueue ch ev)
+                                     (l/complete after-ctx)))))))
 
-#_(time (let [events (lazy-cat ["test" "world hello"] ["diff"])
-              ctx {}
-              handlers [(fn [{[e & more] :events
-                              :keys [ctx path]
-                              :as m}]
-                          (when-let [c (:count ctx)]
-                            (-> m
-                                (assoc :events more)
-                                (assoc :out-events (repeat c e)))))
-                        (fn [{[e & more] :events
-                              :keys [ctx path]
-                              :as m}]
-                          (-> m
-                              (assoc :events more)
-                              (assoc :out-events [e])))]]
-          (mapcat :out-events
-                  (take-while #(or (:out-events %) (seq (:events %)))
-                              (rest (iterate (fn [{:keys [events path ctx] :as m}]
-                                               (when (seq events)
-                                                 (if-let [handled-m (handle-events handlers m)]
-                                                   (merge m (dissoc handled-m :path))
-                                                   ;; TODO handle with default
-                                                   (do))))
+(defn add-str [ch s]
+  (l/enqueue ch (. event-factory (createCharacters s))))
 
-                                             {:events events
-                                              :path nil
-                                              :ctx ctx}))))))
+(defn add-tag [ch & elements]
+  (doseq [element elements]
+    ))
 
+(defn transform-file [in-stream out-writer transformer]
+  (let [[our-ch their-ch] (l/channel-pair)
+        {:keys [events reader]} (xml->events in-stream)
+        [start-doc start-root-tag & more] events
+        renderer-task (lex/task
+                       (events->xml (l/channel->lazy-seq our-ch)
+                                    out-writer))]
 
+    (l/siphon (l/lazy-seq->channel more) our-ch)
 
-#_(traverse (xml->events (java.io.StringReader. "<foo><bar>Hello world</bar></foo>"))
-            :ctx {:key :v
-                  :evs []}
-            :handlers [(fn [events {:keys [ctx] :as handler-info}]
-                         (let [[e & more] events]
-                           [e (update-in ctx [:evs] conj {:ev e}) more]))])
+    (l/enqueue their-ch start-doc)
+            
+    (l/run-pipeline nil
+                    (fn [_]
+                      (transformer their-ch start-root-tag))
+
+                    (fn [ctx]
+                      ;; This redirects any unused events (ideally
+                      ;; just the end-root and end-doc) back to us
+                      (l/siphon their-ch their-ch)
+                      (l/close their-ch)
+                      (.close reader)
+                              
+                      (l/run-pipeline nil
+                                      ;; await the renderer task
+                                      (constantly renderer-task)
+
+                                      ;; return the context
+                                      (constantly ctx))))))
+
+#_(let [sw (java.io.StringWriter.)
+      sr (java.io.StringReader. "<root><hello><world>Text</world><world>More text</world></hello></root>")]
+  @(transform-file sr sw
+                   (fn [ch current-tag]
+                     (transform-tag-content ch current-tag
+                                            :path-transformers
+                                            {[:hello]
+                                             (fn [& {:keys [ch current-tag ctx]}]
+                                               (transform-tag-content ch current-tag
+                                                                      :path-transformers {[:world]
+                                                                                          (fn [& {:keys [ch current-tag ctx]}]
+                                                                                            (transform-tag-content ch current-tag
+                                                                                                                   :ctx ctx
+                                                                                                                   :path-transformers {['text]
+                                                                                                                                       (fn [& {:keys [ch text ctx]}]
+                                                                                                                                         (add-str ch (apply str (reverse text)))
+                                                                                                                                         (update-in ctx [:worlds] conj 1))}))
+
+                                                                                          :after
+                                                                                          (fn [& {:keys [ctx]}]
+                                                                                            (add-str ch (format "There were %s :world tags"
+                                                                                                                (count (:worlds ctx)))))}))})))
+  (str sw))
