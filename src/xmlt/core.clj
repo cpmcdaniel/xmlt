@@ -49,9 +49,9 @@
                                      (do (l/enqueue ch ev)
                                          (l/restart m))))
 
-                      EndElement (if-let [new-path (seq (butlast path))]
+                      EndElement (if (seq path)
                                    (do (l/enqueue ch ev)
-                                       (l/restart {:ctx ctx :path (vec new-path)}))
+                                       (l/restart {:ctx ctx :path (vec (butlast path))}))
 
                                    (let [after-ctx (if-let [after-transformer (get path-transformers :after)]
                                                      (after-transformer :ctx ctx :ch ch)
