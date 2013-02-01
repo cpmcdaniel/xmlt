@@ -24,7 +24,7 @@
   (when *w*
     (.add *w* event)))
 
-(defn transform-tag-content [& {:keys [ctx path-transformers]}]
+(defn transform-tag-content [ctx path-transformers]
   (write-event* (.nextEvent *r*))
   (loop [{:keys [ctx path] :as m} {:ctx ctx :path []}]
     (let [^XMLEvent ev (.peek *r*)]
@@ -34,7 +34,7 @@
                        (if-let [transformer (or (get path-transformers (map :tag new-path))
                                                 (get path-transformers (conj (mapv :tag path) :<*>))
                                                 (get path-transformers [:<*>]))]
-                         (recur {:ctx (transformer :ctx ctx :path new-path) :path path})
+                         (recur {:ctx (transformer ctx :path new-path) :path path})
                          (do (write-event* (.nextEvent *r*))
                              (recur {:ctx ctx :path new-path}))))
 
@@ -42,7 +42,7 @@
                          text (.. ^Characters ev getData)]
                      (if-let [transformer (or (get path-transformers (conj (mapv :tag path) :*))
                                               (get path-transformers [:<*> :*]))]
-                       (recur {:ctx (transformer :text text :ctx ctx :path path) :path path})
+                       (recur {:ctx (transformer ctx :text text :path path) :path path})
                        (do (write-event* ev)
                            (recur m))))
 
@@ -52,7 +52,7 @@
                            (recur {:ctx ctx :path (vec (butlast path))}))
 
                        (let [after-ctx (if-let [after-transformer (get path-transformers :after)]
-                                         (after-transformer :ctx ctx)
+                                         (after-transformer ctx)
                                          ctx)]
                          (write-event* ev)
                          after-ctx)))
@@ -96,32 +96,33 @@
       (let [_ (.nextEvent r)] ;; start doc event
         (transformer)))))
 
-#_(let [sw (java.io.StringWriter.)
+(let [sw (java.io.StringWriter.)
       sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Kept</test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
-                     :path-transformers
+                     {}
                      {[:hello]
-                      (fn [& _]
+                      (fn [ctx & _]
                         (transform-tag-content
-                         :path-transformers {[:test :<*>]
-                                             (fn [& {:keys [ctx path]}]
-                                               (transform-tag-content
-                                                :ctx ctx
-                                                :path-transformers {[:*]
-                                                                    (fn [& {:keys [text ctx]}]
-                                                                      (add-str (apply str "In '" (apply str (interpose "," (map (comp name :tag) path))) "' tag: " (reverse text))))}))
-                                             [:world]
-                                             (fn [& {:keys [ctx]}]
-                                               (transform-tag-content
-                                                :ctx ctx
-                                                :path-transformers {[:*]
-                                                                    (fn [& {:keys [text ctx]}]
-                                                                      (add-str (apply str (repeat 2 text)))
-                                                                      (update-in ctx [:worlds] conj 1))}))
+                         {}
+                         {[:test :<*>]
+                          (fn [ctx & {:keys [path]}]
+                            (transform-tag-content
+                             ctx
+                             {[:*]
+                              (fn [ctx & {:keys [text]}]
+                                (add-str (apply str "In '" (apply str (interpose "," (map (comp name :tag) path))) "' tag: " (reverse text))))}))
+                          [:world]
+                          (fn [ctx & _]
+                            (transform-tag-content
+                             ctx
+                             {[:*]
+                              (fn [ctx & {:keys [text]}]
+                                (add-str (apply str (repeat 2 text)))
+                                (update-in ctx [:worlds] conj 1))}))
 
-                                             :after
-                                             (fn [& {:keys [ctx]}]
-                                               (add-tag [:world-count (count (:worlds ctx))]))}))})))
+                          :after
+                          (fn [ctx & _]
+                            (add-tag [:world-count (count (:worlds ctx))]))}))})))
   (str sw))
