@@ -57,8 +57,9 @@
                          (write-event* ev)
                          after-ctx)))
 
-        (do (write-event* (.nextEvent *r*))
-            (recur m))))))
+        (when (.hasNext *r*)
+          (write-event* (.nextEvent *r*))
+          (recur m))))))
 
 (defn add-str [s]
   (write-event* (. event-factory (createCharacters s))))
@@ -79,22 +80,7 @@
               w (open-xml-writer out-writer)]
     (binding [*r* r
               *w* w]
-      (let [start-doc (.nextEvent r)]
-
-        (write-event* start-doc)
-
-        (let [ctx (transformer)]
-
-          (write-event* (.nextEvent *r*)) ;; end doc event
-
-          ;; return the context
-          ctx)))))
-
-(defn traverse-file [in-stream transformer]
-  (with-open [r (open-xml-reader in-stream)]
-    (binding [*r* r]
-      (let [_ (.nextEvent r)] ;; start doc event
-        (transformer)))))
+      (transformer))))
 
 (let [sw (java.io.StringWriter.)
       sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Kept</test3><world>doubled</world><world>doubled again</world></hello></root>")]
@@ -102,7 +88,7 @@
                   (fn []
                     (transform-tag-content
                      {}
-                     {[:hello]
+                     {[:root :hello]
                       (fn [ctx & _]
                         (transform-tag-content
                          {}
