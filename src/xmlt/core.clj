@@ -27,16 +27,18 @@
       (condp instance? ev
         StartElement (let [start-el-name (keyword (.. ^StartElement ev getName getLocalPart))
                            new-path (conj path {:tag start-el-name})]
-                       (if-let [transformer (get path-transformers (map :tag new-path))]
-                         (recur {:ctx (transformer :ctx ctx) :path path})
+                       (if-let [transformer (or (get path-transformers (map :tag new-path))
+                                                (get path-transformers (conj (mapv :tag path) :<*>))
+                                                (get path-transformers [:<*>]))]
+                         (recur {:ctx (transformer :ctx ctx :path new-path) :path path})
                          (do (.add *w* (.nextEvent *r*))
                              (recur {:ctx ctx :path new-path}))))
 
         Characters (let [ev (.nextEvent *r*)
-                         text (.. ^Characters ev getData)
-                         new-path (conj path {:tag 'text})]
-                     (if-let [transformer (get path-transformers (map :tag new-path))]
-                       (recur {:ctx (transformer :text text :ctx ctx) :path path})
+                         text (.. ^Characters ev getData)]
+                     (if-let [transformer (or (get path-transformers (conj (mapv :tag path) :*))
+                                              (get path-transformers [:<*> :*]))]
+                       (recur {:ctx (transformer :text text :ctx ctx :path path) :path path})
                        (do (.add *w* ev)
                            (recur m))))
 
@@ -85,7 +87,7 @@
           ctx)))))
 
 #_(let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello><world>Hello world</world><world>Hello world again</world></hello></root>")]
+      sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Kept</test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
@@ -93,13 +95,20 @@
                      {[:hello]
                       (fn [& _]
                         (transform-tag-content
-                         :path-transformers {[:world]
+                         :path-transformers {[:test :<*>]
+                                             (fn [& {:keys [ctx path]}]
+                                               (transform-tag-content
+                                                :ctx ctx
+                                                :path-transformers {[:*]
+                                                                    (fn [& {:keys [text ctx]}]
+                                                                      (add-str (apply str "In '" (apply str (interpose "," (map (comp name :tag) path))) "' tag: " (reverse text))))}))
+                                             [:world]
                                              (fn [& {:keys [ctx]}]
                                                (transform-tag-content
                                                 :ctx ctx
-                                                :path-transformers {['text]
+                                                :path-transformers {[:*]
                                                                     (fn [& {:keys [text ctx]}]
-                                                                      (add-str (apply str (reverse text)))
+                                                                      (add-str (apply str (repeat 2 text)))
                                                                       (update-in ctx [:worlds] conj 1))}))
 
                                              :after
