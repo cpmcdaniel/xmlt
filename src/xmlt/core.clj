@@ -2,30 +2,30 @@
   (:import [javax.xml.stream
             XMLInputFactory XMLOutputFactory XMLEventFactory XMLEventReader XMLEventWriter]
            [javax.xml.stream.events
-            StartElement EndElement Characters]))
+            XMLEvent StartElement EndElement Characters]))
 
 
-(def input-factory ^XMLInputFactory (XMLInputFactory/newFactory))
-(def output-factory ^XMLOutputFactory (XMLOutputFactory/newFactory))
-(def event-factory ^XMLEventFactory (XMLEventFactory/newFactory))
+(def ^XMLInputFactory input-factory (XMLInputFactory/newFactory))
+(def ^XMLOutputFactory output-factory (XMLOutputFactory/newFactory))
+(def ^XMLEventFactory event-factory (XMLEventFactory/newFactory))
 
-(defn open-xml-reader [reader-or-stream]
+(defn ^XMLEventReader open-xml-reader [reader-or-stream]
   ;; TODO encoding?
-  (. input-factory (createXMLEventReader reader-or-stream)))
+  (.createXMLEventReader input-factory reader-or-stream))
 
-(defn open-xml-writer [writer-or-stream]
+(defn ^XMLEventWriter open-xml-writer [writer-or-stream]
   ;; TODO again, encoding...
-  (. output-factory (createXMLEventWriter writer-or-stream)))
+  (.createXMLEventWriter output-factory writer-or-stream))
 
-(def ^:dynamic *r* nil)
-(def ^:dynamic *w* nil)
+(def ^:dynamic ^XMLEventReader *r* nil)
+(def ^:dynamic ^XMLEventWriter *w* nil)
 
 (defn transform-tag-content [& {:keys [ctx path-transformers]}]
   (. *w* (add (.nextEvent *r*)))
   (loop [{:keys [ctx path] :as m} {:ctx ctx :path []}]
-    (let [ev (.peek *r*)]
+    (let [^XMLEvent ev (.peek *r*)]
       (condp instance? ev
-        StartElement (let [start-el-name (keyword (.. ev getName getLocalPart))
+        StartElement (let [start-el-name (keyword (.. ^StartElement ev getName getLocalPart))
                            new-path (conj path {:tag start-el-name})]
                        (if-let [transformer (get path-transformers (map :tag new-path))]
                          (recur {:ctx (transformer :ctx ctx) :path path})
@@ -33,7 +33,7 @@
                              (recur {:ctx ctx :path new-path}))))
 
         Characters (let [ev (.nextEvent *r*)
-                         text (.. ev getData)
+                         text (.. ^Characters ev getData)
                          new-path (conj path {:tag 'text})]
                      (if-let [transformer (get path-transformers (map :tag new-path))]
                        (recur {:ctx (transformer :text text :ctx ctx) :path path})
