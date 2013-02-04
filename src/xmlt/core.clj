@@ -61,12 +61,17 @@
         (if (.hasNext *r*)
           (do (write-event* (.nextEvent *r*))
               (recur m))
-
           ctx)))))
 
-(defn delete-tag []
-  (binding [*w* nil]
-    (transform-tag-content {} {})))
+(defn replace-tag [ctx path-transformers]
+  (let [w *w*]
+    (binding [*w* nil]
+      (transform-tag-content ctx
+                             (into {}
+                                   (for [[k v] path-transformers]
+                                     [k (fn [& args]
+                                          (binding [*w* w]
+                                            (apply v args)))]))))))
 
 (defn add-str [s]
   (write-event* (. event-factory (createCharacters s))))
@@ -122,7 +127,9 @@
 
                           [:test3]
                           (fn [_ & _]
-                            (delete-tag))
+                            (replace-tag {} {:after
+                                             (fn [ctx & _]
+                                               (add-tag [:replaced "Hello world"]))}))
 
                           :after
                           (fn [ctx & _]
