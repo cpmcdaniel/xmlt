@@ -64,6 +64,10 @@
 
           ctx)))))
 
+(defn delete-tag []
+  (binding [*w* nil]
+    (transform-tag-content {} {})))
+
 (defn add-str [s]
   (write-event* (. event-factory (createCharacters s))))
 
@@ -91,7 +95,7 @@
       (transformer))))
 
 (let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Kept</test3><world>doubled</world><world>doubled again</world></hello></root>")]
+      sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
@@ -115,6 +119,10 @@
                               (fn [ctx & {:keys [text]}]
                                 (add-str (apply str (repeat 2 text)))
                                 (update-in ctx [:worlds] conj 1))}))
+
+                          [:test3]
+                          (fn [_ & _]
+                            (delete-tag))
 
                           :after
                           (fn [ctx & _]
