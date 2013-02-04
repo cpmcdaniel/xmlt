@@ -26,6 +26,7 @@
 
 (defn transform-tag-content [ctx path-transformers]
   (write-event* (.nextEvent *r*))
+
   (loop [{:keys [ctx path] :as m} {:ctx ctx :path []}]
     (let [^XMLEvent ev (.peek *r*)]
       (condp instance? ev
@@ -57,9 +58,11 @@
                          (write-event* ev)
                          after-ctx)))
 
-        (when (.hasNext *r*)
-          (write-event* (.nextEvent *r*))
-          (recur m))))))
+        (if (.hasNext *r*)
+          (do (write-event* (.nextEvent *r*))
+              (recur m))
+
+          ctx)))))
 
 (defn add-str [s]
   (write-event* (. event-factory (createCharacters s))))
