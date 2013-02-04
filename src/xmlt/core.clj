@@ -85,6 +85,11 @@
               *w* w]
       (transformer))))
 
+(defn traverse-file [in-stream transformer]
+  (with-open [r (open-xml-reader in-stream)]
+    (binding [*r* r]
+      (transformer))))
+
 (let [sw (java.io.StringWriter.)
       sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Kept</test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
