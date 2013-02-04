@@ -40,8 +40,8 @@
 
         Characters (let [ev (.nextEvent *r*)
                          text (.. ^Characters ev getData)]
-                     (if-let [transformer (or (get path-transformers (conj (mapv :tag path) :*))
-                                              (get path-transformers [:<*> :*]))]
+                     (if-let [transformer (or (get path-transformers (conj (mapv :tag path) :-text))
+                                              (get path-transformers [:<*> :-text]))]
                        (recur {:ctx (transformer ctx :text text :path path) :path path})
                        (do (write-event* ev)
                            (recur m))))
@@ -96,14 +96,14 @@
                           (fn [ctx & {:keys [path]}]
                             (transform-tag-content
                              ctx
-                             {[:*]
+                             {[:-text]
                               (fn [ctx & {:keys [text]}]
-                                (add-str (apply str "In '" (apply str (interpose "," (map (comp name :tag) path))) "' tag: " (reverse text))))}))
+                                (add-str (apply str "In '" (apply str (interpose "," (map :tag path))) "' tag: " (reverse text))))}))
                           [:world]
                           (fn [ctx & _]
                             (transform-tag-content
                              ctx
-                             {[:*]
+                             {[:-text]
                               (fn [ctx & {:keys [text]}]
                                 (add-str (apply str (repeat 2 text)))
                                 (update-in ctx [:worlds] conj 1))}))
