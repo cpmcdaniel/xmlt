@@ -77,10 +77,16 @@
   (write-event* (. event-factory (createCharacters s))))
 
 (defn add-tag [element]
-  ;; TODO doesn't handle attributes yet.
   (cond
-   (vector? element) (let [[tag & content] element]
-                       (write-event* (. event-factory (createStartElement "" "" (name tag))))
+   (vector? element) (let [[tag attr-map? & more] element
+                           [attr-map content] (if (map? attr-map?)
+                                                  [attr-map? more]
+                                                  [nil (cons attr-map? more)])
+                             attributes (for [[k v] attr-map]
+                                          (. event-factory (createAttribute (name k) v)))]
+                       (write-event* (. event-factory (createStartElement "" "" (name tag)
+                                                                          (.iterator attributes)
+                                                                          (.iterator []))))
                        (add-tag content)
                        (write-event* (. event-factory (createEndElement "" "" (name tag)))))
    (string? element) (write-event* (. event-factory (createCharacters element)))
@@ -129,7 +135,8 @@
                           (fn [_ & _]
                             (replace-tag {} {:after
                                              (fn [ctx & _]
-                                               (add-tag [:replaced "Hello world"]))}))
+                                               (add-tag [:replaced {:key "value"}
+                                                        "Hello world"]))}))
 
                           :after
                           (fn [ctx & _]
