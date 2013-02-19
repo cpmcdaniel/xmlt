@@ -5,4 +5,8 @@
   :url "https://github.com/james-henderson/xmlt"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.4.0"]])
+  :dependencies [[org.clojure/clojure "1.4.0"]]
+
+  :scm {:name "git"
+        :tag ~(.trim (:out (sh "git" "rev-parse" "HEAD")))
+        :url "https://github.com/james-henderson/xmlt"})
