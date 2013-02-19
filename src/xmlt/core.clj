@@ -79,13 +79,13 @@
   (cond
    (vector? element) (let [[tag attr-map? & more] element
                            [attr-map content] (if (map? attr-map?)
-                                                  [attr-map? more]
-                                                  [nil (cons attr-map? more)])
+                                                [attr-map? more]
+                                                [nil (cons attr-map? more)])
                            attributes (for [[k v] attr-map]
-                                          (. event-factory (createAttribute (name k) v)))]
+                                        (. event-factory (createAttribute (name k) v)))]
                        (write-event* *w* (. event-factory (createStartElement "" "" (name tag)
-                                                                          (.iterator attributes)
-                                                                          (.iterator []))))
+                                                                              (.iterator attributes)
+                                                                              (.iterator []))))
                        (add-tag content)
                        (write-event* *w* (. event-factory (createEndElement "" "" (name tag)))))
    (string? element) (write-event* *w* (. event-factory (createCharacters element)))
@@ -96,8 +96,8 @@
   (let [attributes (for [[k v] attrs]
                      (. event-factory (createAttribute (name k) v)))]
     (write-event* *w* (. event-factory (createStartElement "" "" (name tag)
-                                                       (.iterator attributes)
-                                                       (.iterator [])))))
+                                                           (.iterator attributes)
+                                                           (.iterator [])))))
   (f)
   (write-event* *w* (. event-factory (createEndElement "" "" (name tag)))))
 
