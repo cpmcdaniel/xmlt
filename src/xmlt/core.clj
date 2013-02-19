@@ -19,13 +19,14 @@
 
 (def ^:dynamic ^XMLEventReader *r* nil)
 (def ^:dynamic ^XMLEventWriter *w* nil)
+(def ^:dynamic ^XMLEventWriter *existing-events-writer* nil)
 
-(defn write-event* [^XMLEvent event]
-  (when *w*
-    (.add *w* event)))
+(defn write-event* [w ^XMLEvent event]
+  (when w
+    (.add w event)))
 
 (defn transform-tag-content [ctx path-transformers]
-  (write-event* (.nextEvent *r*))
+  (write-event* *existing-events-writer* (.nextEvent *r*))
 
   (loop [{:keys [ctx path] :as m} {:ctx ctx :path []}]
     (let [^XMLEvent ev (.peek *r*)]
@@ -40,7 +41,7 @@
                                                 (get path-transformers (conj (mapv :tag path) :<*>))
                                                 (get path-transformers [:<*>]))]
                          (recur {:ctx (transformer ctx :path new-path) :path path})
-                         (do (write-event* (.nextEvent *r*))
+                         (do (write-event* *existing-events-writer* (.nextEvent *r*))
                              (recur {:ctx ctx :path new-path}))))
 
         Characters (let [ev (.nextEvent *r*)
@@ -48,37 +49,31 @@
                      (if-let [transformer (or (get path-transformers (conj (mapv :tag path) :-text))
                                               (get path-transformers [:<*> :-text]))]
                        (recur {:ctx (transformer ctx :text text :path path) :path path})
-                       (do (write-event* ev)
+                       (do (write-event* *existing-events-writer* ev)
                            (recur m))))
 
         EndElement (let [ev (.nextEvent *r*)]
                      (if (seq path)
-                       (do (write-event* ev)
+                       (do (write-event* *existing-events-writer* ev)
                            (recur {:ctx ctx :path (vec (butlast path))}))
 
                        (let [after-ctx (if-let [after-transformer (get path-transformers :after)]
                                          (after-transformer ctx)
                                          ctx)]
-                         (write-event* ev)
+                         (write-event* *existing-events-writer* ev)
                          after-ctx)))
 
         (if (.hasNext *r*)
-          (do (write-event* (.nextEvent *r*))
+          (do (write-event* *existing-events-writer* (.nextEvent *r*))
               (recur m))
           ctx)))))
 
 (defn replace-tag [ctx path-transformers]
-  (let [w *w*]
-    (binding [*w* nil]
-      (transform-tag-content ctx
-                             (into {}
-                                   (for [[k v] path-transformers]
-                                     [k (fn [& args]
-                                          (binding [*w* w]
-                                            (apply v args)))]))))))
+  (binding [*existing-events-writer* nil]
+    (transform-tag-content ctx path-transformers)))
 
 (defn add-str [s]
-  (write-event* (. event-factory (createCharacters s))))
+  (write-event* *w* (. event-factory (createCharacters s))))
 
 (defn add-tag [element]
   (cond
@@ -88,23 +83,23 @@
                                                   [nil (cons attr-map? more)])
                            attributes (for [[k v] attr-map]
                                           (. event-factory (createAttribute (name k) v)))]
-                       (write-event* (. event-factory (createStartElement "" "" (name tag)
+                       (write-event* *w* (. event-factory (createStartElement "" "" (name tag)
                                                                           (.iterator attributes)
                                                                           (.iterator []))))
                        (add-tag content)
-                       (write-event* (. event-factory (createEndElement "" "" (name tag)))))
-   (string? element) (write-event* (. event-factory (createCharacters element)))
+                       (write-event* *w* (. event-factory (createEndElement "" "" (name tag)))))
+   (string? element) (write-event* *w* (. event-factory (createCharacters element)))
    (seq? element) (doseq [e element] (add-tag e))
    :otherwise (add-tag (str element))))
 
 (defn in-tag* [tag attrs f]
   (let [attributes (for [[k v] attrs]
                      (. event-factory (createAttribute (name k) v)))]
-    (write-event* (. event-factory (createStartElement "" "" (name tag)
+    (write-event* *w* (. event-factory (createStartElement "" "" (name tag)
                                                        (.iterator attributes)
                                                        (.iterator [])))))
   (f)
-  (write-event* (. event-factory (createEndElement "" "" (name tag)))))
+  (write-event* *w* (. event-factory (createEndElement "" "" (name tag)))))
 
 (defmacro in-tag [tag attrs & body]
   `(in-tag* ~tag ~attrs (fn [] ~@body)))
@@ -113,7 +108,8 @@
   (with-open [r (open-xml-reader in-stream)
               w (open-xml-writer out-writer)]
     (binding [*r* r
-              *w* w]
+              *w* w
+              *existing-events-writer* w]
       (transformer))))
 
 (defn traverse-file [in-stream transformer]
@@ -123,8 +119,12 @@
 
 ;; TESTS
 
+;; Sorry, this is a rather large test, but it does showcase most of
+;; the functionality above. When I get a couple of days, I'll re-write
+;; this into separate tests and document it heavily.
+
 (let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello hello-key=\"value\"><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
+      sr (java.io.StringReader. "<root><hello hello-key=\"value\"><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted<also>and me too</also></test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
@@ -153,10 +153,14 @@
 
                             [:test3]
                             (fn [_ & _]
-                              (replace-tag {} {:after
+                              (replace-tag {} {[:also :-text]
+                                               (fn [ctx & {:keys [text]}]
+                                                 (assoc ctx :deleted-text text))
+                                               :after
                                                (fn [ctx & _]
                                                  (add-tag [:replaced {:key "value"}
-                                                           "Hello world"]))}))
+                                                           "Hello world"
+                                                           [:deleted (:deleted-text ctx)]]))}))
 
                             :after
                             (fn [ctx & _]
