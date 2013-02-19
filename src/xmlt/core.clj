@@ -105,6 +105,54 @@
     (binding [*r* r]
       (transformer))))
 
+;; TODO before/after tag
+
+(defn process-transformers [{:keys [ctx path reader writer]} transformers]
+  )
+
+(defn at-path [desired-path & transformers]
+  (let [reversed-path (reverse desired-path)
+        path-count (count desired-path)]
+    (fn [{:keys [path] :as m}]
+      (when (= (take path-count path) (reversed-path))
+        (process-transformers m transformers)))))
+
+(defn update-text [f & args]
+  (fn [{:keys [ctx text]}]
+    (add-str (apply f text args))
+    {:ctx ctx}))
+
+(defmacro get-context [[m] & transformers]
+  `(fn [m#]
+     (let [~m m#]
+       (process-transformers m# ~transformers))))
+
+(defn delete-tag [& transformers]
+  (fn [m]
+    (let [m (-> m
+                (dissoc :writer)
+                (assoc
+                    :process-start-tag :ctx
+                    :process-end-tag :ctx))]
+      (process-transformers m transformers))))
+
+(defn replace-tag [tag attr-map & transformers]
+  (fn [{:keys [reader writer]}]
+    ))
+
+(defn transform-file [r w & transformers]
+  (process-transformers {:reader r
+                         :writer w
+                         :path '()
+                         :ctx nil}
+                        transformers))
+
+;; TESTS
+
+;; Sorry, this is a rather large test, but it does showcase most of
+;; the functionality above. When I get a couple of days, I'll re-write
+;; this into separate tests and document it heavily.
+
 (let [sw (java.io.StringWriter.)
       sr (java.io.StringReader. "<root><hello><test>Test-Text</test><test2>I'm still here!</test2></hello></root>")]
   (transform-file sr sw
