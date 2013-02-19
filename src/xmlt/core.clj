@@ -82,7 +82,7 @@
                            [attr-map content] (if (map? attr-map?)
                                                   [attr-map? more]
                                                   [nil (cons attr-map? more)])
-                             attributes (for [[k v] attr-map]
+                           attributes (for [[k v] attr-map]
                                           (. event-factory (createAttribute (name k) v)))]
                        (write-event* (. event-factory (createStartElement "" "" (name tag)
                                                                           (.iterator attributes)
@@ -92,6 +92,18 @@
    (string? element) (write-event* (. event-factory (createCharacters element)))
    (seq? element) (doseq [e element] (add-tag e))
    :otherwise (add-tag (str element))))
+
+(defn in-tag* [tag attrs f]
+  (let [attributes (for [[k v] attrs]
+                     (. event-factory (createAttribute (name k) v)))]
+    (write-event* (. event-factory (createStartElement "" "" (name tag)
+                                                       (.iterator attributes)
+                                                       (.iterator [])))))
+  (f)
+  (write-event* (. event-factory (createEndElement "" "" (name tag)))))
+
+(defmacro in-tag [tag attrs & body]
+  `(in-tag* ~tag ~attrs (fn [] ~@body)))
 
 (defn transform-file [in-stream out-writer transformer]
   (with-open [r (open-xml-reader in-stream)
@@ -104,6 +116,8 @@
   (with-open [r (open-xml-reader in-stream)]
     (binding [*r* r]
       (transformer))))
+
+;; TESTS
 
 (let [sw (java.io.StringWriter.)
       sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
@@ -124,12 +138,13 @@
                                 (add-str (apply str "In '" (apply str (interpose "," (map :tag path))) "' tag: " (reverse text))))}))
                           [:world]
                           (fn [ctx & _]
-                            (transform-tag-content
-                             ctx
-                             {[:-text]
-                              (fn [ctx & {:keys [text]}]
-                                (add-str (apply str (repeat 2 text)))
-                                (update-in ctx [:worlds] conj 1))}))
+                            (in-tag :in-tag {:key "value"}
+                                    (transform-tag-content
+                                     ctx
+                                     {[:-text]
+                                      (fn [ctx & {:keys [text]}]
+                                        (add-str (apply str (repeat 2 text)))
+                                        (update-in ctx [:worlds] conj 1))})))
 
                           [:test3]
                           (fn [_ & _]
