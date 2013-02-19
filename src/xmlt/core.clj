@@ -2,7 +2,7 @@
   (:import [javax.xml.stream
             XMLInputFactory XMLOutputFactory XMLEventFactory XMLEventReader XMLEventWriter]
            [javax.xml.stream.events
-            XMLEvent StartElement EndElement Characters]))
+            Attribute XMLEvent StartElement EndElement Characters]))
 
 
 (def ^XMLInputFactory input-factory (XMLInputFactory/newFactory))
@@ -31,7 +31,11 @@
     (let [^XMLEvent ev (.peek *r*)]
       (condp instance? ev
         StartElement (let [start-el-name (keyword (.. ^StartElement ev getName getLocalPart))
-                           new-path (conj path {:tag start-el-name})]
+                           attributes (iterator-seq (. ^StartElement ev getAttributes))
+                           attr-map (into {} (for [^Attribute attribute attributes]
+                                               [(keyword (.. attribute getName getLocalPart)) (. attribute getValue)]))
+                           new-path (conj path {:tag start-el-name
+                                                :attrs attr-map})]
                        (if-let [transformer (or (get path-transformers (map :tag new-path))
                                                 (get path-transformers (conj (mapv :tag path) :<*>))
                                                 (get path-transformers [:<*>]))]
@@ -120,40 +124,42 @@
 ;; TESTS
 
 (let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
+      sr (java.io.StringReader. "<root><hello hello-key=\"value\"><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
                      {}
                      {[:root :hello]
-                      (fn [ctx & _]
-                        (transform-tag-content
-                         {}
-                         {[:test :<*>]
-                          (fn [ctx & {:keys [path]}]
-                            (transform-tag-content
-                             ctx
-                             {[:-text]
-                              (fn [ctx & {:keys [text]}]
-                                (add-str (apply str "In '" (apply str (interpose "," (map :tag path))) "' tag: " (reverse text))))}))
-                          [:world]
-                          (fn [ctx & _]
-                            (in-tag :in-tag {:key "value"}
-                                    (transform-tag-content
-                                     ctx
-                                     {[:-text]
-                                      (fn [ctx & {:keys [text]}]
-                                        (add-str (apply str (repeat 2 text)))
-                                        (update-in ctx [:worlds] conj 1))})))
+                      (fn [ctx & {:keys [path]}]
+                        (let [[_ hello-tag] path]
+                          (transform-tag-content
+                           {}
+                           {[:test :<*>]
+                            (fn [ctx & {:keys [path]}]
+                              (transform-tag-content
+                               ctx
+                               {[:-text]
+                                (fn [ctx & {:keys [text]}]
+                                  (add-str (apply str "In '" (apply str (interpose "," (map :tag path))) "' tag: " (reverse text))))}))
+                            [:world]
+                            (fn [ctx & _]
+                              (in-tag :in-tag {:key "value"}
+                                      (transform-tag-content
+                                       ctx
+                                       {[:-text]
+                                        (fn [ctx & {:keys [text]}]
+                                          (add-str (apply str (repeat 2 text)))
+                                          (update-in ctx [:worlds] conj 1))})))
 
-                          [:test3]
-                          (fn [_ & _]
-                            (replace-tag {} {:after
-                                             (fn [ctx & _]
-                                               (add-tag [:replaced {:key "value"}
-                                                        "Hello world"]))}))
+                            [:test3]
+                            (fn [_ & _]
+                              (replace-tag {} {:after
+                                               (fn [ctx & _]
+                                                 (add-tag [:replaced {:key "value"}
+                                                           "Hello world"]))}))
 
-                          :after
-                          (fn [ctx & _]
-                            (add-tag [:world-count (count (:worlds ctx))]))}))})))
+                            :after
+                            (fn [ctx & _]
+                              (add-tag [:hello-key-value (get-in hello-tag [:attrs :hello-key])])
+                              (add-tag [:world-count (count (:worlds ctx))]))})))})))
   (str sw))
