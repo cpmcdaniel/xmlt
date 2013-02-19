@@ -106,7 +106,31 @@
       (transformer))))
 
 (let [sw (java.io.StringWriter.)
-      sr (java.io.StringReader. "<root><hello><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted</test3><world>doubled</world><world>doubled again</world></hello></root>")]
+      sr (java.io.StringReader. "<root><hello><test>Test-Text</test><test2>I'm still here!</test2></hello></root>")]
+  (transform-file sr sw
+                  (at-path [:root :hello :test :-text]
+                           (get-context [{:keys [ctx]}]
+                                        (update-text reverse)))
+                  (at-path [:root :hello :test2]
+                           (delete-tag
+                            (after-end-tag
+                             (add-tag [:deleted "Sorry."])))))
+  (str sw))
+
+
+;; so - each of the at-path calls returns a fn taking a map with keys
+;; #{:path :ctx :reader :writer}. If the path matches, it returns
+;; {:ctx new-ctx}, or nil if the path doesn't match. It also swallows
+;; up everything from the reader up to the matching end tag.  The user
+;; can also add before-start-tag, after-start-tag, before-end-tag or
+;; after-end-tag, with predictable semantics
+
+;; only trouble now is getting the user r/w access to the ctx...
+
+
+
+(let [sw (java.io.StringWriter.)
+      sr (java.io.StringReader. "<root><hello hello-key=\"value\"><test><test2>desreveR</test2><test4>drawkcaB</test4></test><test3>Deleted<also>and me too</also></test3><world>doubled</world><world>doubled again</world></hello></root>")]
   (transform-file sr sw
                   (fn []
                     (transform-tag-content
@@ -142,3 +166,4 @@
                           (fn [ctx & _]
                             (add-tag [:world-count (count (:worlds ctx))]))}))})))
   (str sw))
+
